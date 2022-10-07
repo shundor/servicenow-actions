@@ -1,0 +1,93 @@
+name: 'ServiceNow ITSM Actions'
+description: 'ServiceNow ITSM Actions powered by Ansible'
+branding:
+  icon: cloud-snow
+  color: orange
+inputs:
+  sn_host:
+    description: 'ServiceNow instance host'
+    required: true
+  sn_username:
+    description: 'ServiceNow username'
+    required: true
+  sn_password:
+    description: 'ServiceNow password'
+    required: true
+  sn_client_id:
+    description: 'ServiceNow client ID'
+    required: true
+  sn_client_secret:
+    description: 'ServiceNow client secret'
+    required: true
+  sn_module:
+    description: 'ServiceNow module name'
+    required: true
+  sn_module_params:
+    description: 'ServiceNow module parameters'
+    required: true
+  debug:
+    description: 'Enable debug mode'
+    required: false
+    default: 'false'
+outputs:
+  output:
+    description: "Playbook output"
+    value: ${{ steps.run-playbook.outputs.output }}    
+runs:
+  using: composite
+  steps:
+    - name: Validate input
+      id: validate
+      shell: bash
+      run: |
+        WORD_LIST="servicenow.itsm.api servicenow.itsm.api_info servicenow.itsm.attachment servicenow.itsm.change_request servicenow.itsm.change_request_info servicenow.itsm.change_request_task servicenow.itsm.change_request_task_info servicenow.itsm.configuration_item servicenow.itsm.configuration_item_batch servicenow.itsm.configuration_item_info servicenow.itsm.incident servicenow.itsm.incident_info servicenow.itsm.problem servicenow.itsm.problem_info servicenow.itsm.problem_task servicenow.itsm.problem_task_info"
+        MATCH="${{ inputs.sn_module }}"
+
+        if echo $WORD_LIST | grep -w -v $MATCH > /dev/null; then
+            exit 1
+        fi 
+    - name: The validate step has failed
+      if: ${{ failure() && steps.validate.conclusion == 'failure' }}   
+      shell: bash
+      run: echo '${{ inputs.sn_module }} is not a valid module name'   
+    - uses: actions/checkout@v3
+      with:
+        repository: shundor/servicenow-actions
+    - name: Append to playbook
+      run: |
+        echo "    - name: \"${{ inputs.sn_module }}\"" >> playbook.yml
+        echo "      ${{ inputs.sn_module }}:" >> playbook.yml
+        echo "${{ inputs.sn_module_params }}" >> params.txt
+        sed -i 's/^/         /g' params.txt
+        cat params.txt >> playbook.yml    
+        cat playbook.yml
+      shell: bash
+    - name: Upload artifact
+      if: ${{ inputs.debug != 'false' }}   
+      uses: actions/upload-artifact@main
+      with:
+        name: playbook.yml
+        path: playbook.yml  
+    - name: Run playbook
+      id: run-playbook
+      uses: dawidd6/action-ansible-playbook@v2
+      with:
+        playbook: playbook.yml
+        directory: ./
+        requirements: requirements.yml
+        no_color: true
+        inventory: |
+          [local]
+          localhost ansible_connection=local
+        options: |
+          --limit local
+      env:
+        SN_HOST:  ${{ inputs.sn_host }}
+        SN_USERNAME: ${{ inputs.sn_username }}
+        SN_PASSWORD: ${{ inputs.sn_password }}
+        SN_CLIENT_ID: ${{ inputs.sn_client_id }}
+        SN_CLIENT_SECRET: ${{ inputs.sn_client_secret }}
+        SN_MODULE: ${{ inputs.sn_module }}
+        SN_MODULE_PARAMS: ${{ inputs.sn_module_params }}
+        ANSIBLE_LOAD_CALLBACK_PLUGINS: "true"
+        ANSIBLE_STDOUT_CALLBACK: "json"
